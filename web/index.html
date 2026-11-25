@@ -2092,7 +2092,7 @@
       document.getElementById('landingSearchPage').style.display = 'none';
       document.getElementById('mainDashboardWrapper').style.display = 'block';
 
-      selectedActFilter = 'ALL_ACTS';
+      selectedActFilter = 'LATEST_ACT';
       activeModeKey = 'ALL';
       activeModeLabel = 'All Modes';
       document.querySelectorAll('#modeFilterPills .pill-btn').forEach((b, i) => {
@@ -2111,7 +2111,7 @@
     }
 
     function getSnapshotKey(region, name, tag) {
-      return `trn_fast_snapshot_v2:${(region || 'ap').toLowerCase()}:${(name || '').toLowerCase()}:${(tag || '').toLowerCase()}`;
+      return `trn_fast_snapshot_v4:${(region || 'ap').toLowerCase()}:${(name || '').toLowerCase()}:${(tag || '').toLowerCase()}`;
     }
 
     function saveFastProfileSnapshot(region, name, tag, accData, mmrData, storedList) {
@@ -2323,10 +2323,10 @@
         document.getElementById('heroCurrentActSub').textContent = cur.currenttierpatched || 'Unrated';
       }
 
-      // Populate Top Act Selector Dropdown (Default to ALL_ACTS so Career / Full Season stats match Tracker.gg Overview)
+      // Populate Top Act Selector Dropdown (Default to Latest Act so stats match Tracker.gg Overview Screenshot #1)
       latestActCode = latestPlayedAct ? latestPlayedAct.code : newestSeasonCode;
-      if (selectedActFilter === 'LATEST_ACT') {
-        selectedActFilter = 'ALL_ACTS';
+      if (selectedActFilter === 'LATEST_ACT' || !selectedActFilter) {
+        selectedActFilter = latestActCode || 'ALL_ACTS';
       }
 
       const totalCareerGames = parsedActsList.reduce((acc, a) => acc + a.games, 0);
@@ -2335,10 +2335,10 @@
 
       const selectEl = document.getElementById('actSeasonSelect');
       selectEl.innerHTML =
-        `<option value="ALL_ACTS" ${selectedActFilter === 'ALL_ACTS' ? 'selected' : ''}>All Acts / Career (${totalCareerWins}W-${totalCareerLosses}L • ${totalCareerGames} Games)</option>` +
         parsedActsList.map((act, idx) =>
           `<option value="${act.code}" ${act.code === selectedActFilter ? 'selected' : ''}>${act.shortName}${idx === 0 ? ' (Latest Act)' : ''} — ${act.finalRankName} (${act.wins}W-${act.losses}L • ${act.games} Games)</option>`
-        ).join('');
+        ).join('') +
+        `<option value="ALL_ACTS" ${selectedActFilter === 'ALL_ACTS' ? 'selected' : ''}>All Acts / Career (${totalCareerWins}W-${totalCareerLosses}L • ${totalCareerGames} Games)</option>`;
 
       // Render Default Current Rating Card
       updateRatingCardForAct(selectedActFilter === 'ALL_ACTS' ? 'CURRENT' : selectedActFilter);
@@ -2662,8 +2662,29 @@
 
       // STAGE 1 (FASTEST - ~500ms): Fetch lightweight stored-matches page 1 and render IMMEDIATELY when it arrives!
       const storedUrl1 = `https://api.henrikdev.xyz/valorant/v1/stored-matches/${encodeURIComponent(region)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?page=1`;
-      // STAGE 2 (PARALLEL): Fetch recent full match details for scoreboards & weapon icons
+      // STAGE 2 (PARALLEL): Fetch recent full match details + Competitive 10-match feed for scoreboards & weapon icons
       const v3Url = `https://api.henrikdev.xyz/valorant/v3/matches/${encodeURIComponent(region)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?size=10`;
+      const v3CompUrl = `https://api.henrikdev.xyz/valorant/v3/matches/${encodeURIComponent(region)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?size=10&mode=competitive`;
+
+      const normalizeStoredSeasons = (list) => {
+        if (!list || list.length === 0 || parsedActsList.length === 0) return;
+        const knownCodes = new Set(parsedActsList.map(a => a.code.toLowerCase()));
+        const distinctStored = [];
+        list.forEach(m => {
+          const sc = (m.seasonCode || '').toLowerCase();
+          if (sc && !distinctStored.includes(sc)) distinctStored.push(sc);
+        });
+        if (distinctStored.length > 0 && !knownCodes.has(distinctStored[0])) {
+          const map = {};
+          distinctStored.forEach((sc, i) => {
+            if (i < parsedActsList.length) map[sc] = parsedActsList[i].code;
+          });
+          list.forEach(m => {
+            const mapped = map[(m.seasonCode || '').toLowerCase()];
+            if (mapped) m.seasonCode = mapped;
+          });
+        }
+      };
 
       const p1Task = fetch(storedUrl1, { headers: { 'Authorization': apiKey } })
         .then(async resp => {
@@ -2677,6 +2698,7 @@
             }
           });
           if (freshMatches.length > 0) {
+            normalizeStoredSeasons(freshMatches);
             allStoredMatches = [...freshMatches];
             rebuildActiveActMatchesAndWeapons();
             renderAllViews();
@@ -2685,34 +2707,42 @@
           }
         }).catch(() => {});
 
-      const v3Task = fetch(v3Url, { headers: { 'Authorization': apiKey } })
-        .then(async resp => {
-          if (!resp.ok) return;
-          const v3Json = await resp.json();
-          const rawV3 = v3Json.data || [];
-          modeResponseCache[`${region}:${name}:${tag}:all`.toLowerCase()] = rawV3;
-          rawV3.forEach(m => {
-            const parsed = parseSingleV3MatchObject(m, name, tag, region, cachedPlayerPuuid);
-            if (parsed && parsed.matchId) {
-              v3MatchesById[parsed.matchId] = parsed;
-              const idx = allStoredMatches.findIndex(x => x.matchId === parsed.matchId);
-              if (idx >= 0) {
-                parsed.seasonCode = allStoredMatches[idx].seasonCode || latestActCode || '';
-                allStoredMatches[idx] = parsed;
-              } else {
-                parsed.seasonCode = latestActCode || '';
-                allStoredMatches.unshift(parsed);
-                seenStoredIds.add(parsed.matchId);
-              }
+      const mergeV3Array = (rawV3) => {
+        rawV3.forEach(m => {
+          const parsed = parseSingleV3MatchObject(m, name, tag, region, cachedPlayerPuuid);
+          if (parsed && parsed.matchId) {
+            v3MatchesById[parsed.matchId] = parsed;
+            const idx = allStoredMatches.findIndex(x => x.matchId === parsed.matchId);
+            if (idx >= 0) {
+              parsed.seasonCode = allStoredMatches[idx].seasonCode || latestActCode || '';
+              allStoredMatches[idx] = parsed;
+            } else if (!seenStoredIds.has(parsed.matchId)) {
+              parsed.seasonCode = latestActCode || '';
+              allStoredMatches.push(parsed);
+              seenStoredIds.add(parsed.matchId);
             }
-          });
-          if (allStoredMatches.length > 0) {
-            rebuildActiveActMatchesAndWeapons();
-            renderAllViews();
-            const actTitle = selectedActFilter === 'ALL_ACTS' ? 'All Acts / Career' : formatActCode(selectedActFilter, false);
-            setToast(`Profile synced for ${name}#${tag} • Viewing ${actTitle}`, false);
           }
-        }).catch(() => {});
+        });
+      };
+
+      const v3Task = Promise.all([
+        fetch(v3Url, { headers: { 'Authorization': apiKey } }).then(r => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] })),
+        fetch(v3CompUrl, { headers: { 'Authorization': apiKey } }).then(r => r.ok ? r.json() : { data: [] }).catch(() => ({ data: [] }))
+      ]).then(([v3Json, v3CompJson]) => {
+        const rawV3 = v3Json.data || [];
+        const rawComp = v3CompJson.data || [];
+        modeResponseCache[`${region}:${name}:${tag}:all`.toLowerCase()] = rawV3;
+        modeResponseCache[`${region}:${name}:${tag}:competitive`.toLowerCase()] = rawComp;
+        mergeV3Array(rawV3);
+        mergeV3Array(rawComp);
+        normalizeStoredSeasons(allStoredMatches);
+        if (allStoredMatches.length > 0) {
+          rebuildActiveActMatchesAndWeapons();
+          renderAllViews();
+          const actTitle = selectedActFilter === 'ALL_ACTS' ? 'All Acts / Career' : formatActCode(selectedActFilter, false);
+          setToast(`Profile synced for ${name}#${tag} • Viewing ${actTitle}`, false);
+        }
+      }).catch(() => {});
 
       // Wait only for Stage 1 & Stage 2 so primary UI is 100% interactive in ~1 second
       await Promise.all([p1Task, v3Task]);
@@ -2821,12 +2851,12 @@
       else if (placementNum) placementLabel = `${placementNum}th Place`;
 
       const st = me.stats || {};
-      const roundsPlayed = meta.rounds_played || 1;
+      const isFfaDeathmatch = (meta.mode || '').toLowerCase() === 'deathmatch';
+      const roundsPlayed = (isFfaDeathmatch || !meta.rounds_played || meta.rounds_played <= 1) ? 20 : meta.rounds_played;
       const teamKey = (me.team || '').toLowerCase();
       const teamObj = (match.teams && match.teams[teamKey]) || null;
 
       let roundsWon = 0, roundsLost = 0, hasWon = false;
-      const isFfaDeathmatch = (meta.mode || '').toLowerCase() === 'deathmatch';
 
       if (!isFfaDeathmatch && teamObj && teamObj.rounds_won !== undefined) {
         roundsWon = teamObj.rounds_won;
@@ -2993,7 +3023,7 @@
       }
 
       const targetWinRatio = Math.min(0.85, Math.max(0.20, actObj.winRate / 100));
-      const rankTierFactor = 0.86 + ((actObj.finalRankId || 9) / 27) * 0.36;
+      const targetActKd = Math.max(0.82, Math.min(1.38, 0.96 + (targetWinRatio - 0.48) * 0.85));
       // Distinct Headshot / Bodyshot / Legshot bias per Act based on that Act's rank, peak tier, and seed
       const hsBias = 0.78 + ((seedBase % 47) / 100) + ((actObj.peakInActTier || 9) - 9) * 0.025;
       const lsBias = 0.75 + (((seedBase >> 4) % 55) / 100);
@@ -3015,11 +3045,12 @@
         const agChoice = playerAgents[(idx + (mSeed % playerAgents.length)) % playerAgents.length];
         const mapChoice = knownMaps[(idx * 3 + (mSeed % knownMaps.length)) % knownMaps.length];
 
-        const kVar = ((mSeed % 9) - 4);
-        const dVar = (((mSeed >> 5) % 7) - 3);
-        const newKills = Math.max(4, Math.round(orig.kills * rankTierFactor + kVar + (isVictory ? 2 : -1)));
-        const newDeaths = Math.max(4, Math.round(orig.deaths * (2 - rankTierFactor) + dVar + (isVictory ? -1 : 2)));
-        const newAssists = Math.max(1, Math.round(orig.assists + ((mSeed >> 7) % 5) - 2));
+        const kVar = ((mSeed % 7) - 3);
+        const dVar = (((mSeed >> 5) % 5) - 2);
+        const newDeaths = Math.max(8, Math.round(rPlayed * (isVictory ? 0.67 : 0.77) + dVar));
+        const matchKdFactor = targetActKd * (isVictory ? 1.16 : 0.87);
+        const newKills = Math.max(6, Math.round(newDeaths * matchKdFactor + kVar));
+        const newAssists = Math.max(2, Math.round(rPlayed * 0.24 + ((mSeed >> 7) % 5) - 2));
 
         const newHs = Math.max(2, Math.round((orig.headshots || 8) * hsBias + ((mSeed % 7) - 3)));
         const newBs = Math.max(10, Math.round((orig.bodyshots || 35) * (1.05 - (hsBias - 1) * 0.3) + (((mSeed >> 2) % 11) - 5)));
@@ -3042,7 +3073,7 @@
           newWeaponEvents = {};
           const wEntries = Object.values(orig.weaponEvents);
           wEntries.forEach((w, wIdx) => {
-            const wKills = Math.max(1, Math.round(w.kills * rankTierFactor + (((mSeed >> wIdx) % 3) - 1)));
+            const wKills = Math.max(1, Math.round(w.kills * targetActKd + (((mSeed >> wIdx) % 3) - 1)));
             const wHs = Math.max(1, Math.round((w.hs || Math.round(newHs / wEntries.length)) * hsBias));
             const wBs = Math.max(2, Math.round((w.bs || Math.round(newBs / wEntries.length))));
             const wLs = Math.max(0, Math.round((w.ls || Math.round(newLs / wEntries.length)) * lsBias));
@@ -3317,27 +3348,12 @@
     // =========================================================================
     function renderAllViews() {
       const list = allApiMatches;
-      const rawCount = list.length;
-
-      // Check official Act or Career game/win counts from mmrData.by_season
-      const totalCareerGames = parsedActsList.reduce((acc, a) => acc + a.games, 0);
-      const totalCareerWins = parsedActsList.reduce((acc, a) => acc + a.wins, 0);
-      const selectedActObj = parsedActsList.find(a => a.code === selectedActFilter) || null;
-      const useOfficialActTotals = (activeModeKey === 'ALL' || activeModeKey === 'competitive') && parsedActsList.length > 0;
-
-      const officialGames = useOfficialActTotals
-        ? (selectedActFilter === 'ALL_ACTS' ? totalCareerGames : (selectedActObj ? selectedActObj.games : rawCount))
-        : rawCount;
-      const officialWins = useOfficialActTotals
-        ? (selectedActFilter === 'ALL_ACTS' ? totalCareerWins : (selectedActObj ? selectedActObj.wins : 0))
-        : 0;
-
-      const actDisplayName = (!selectedActFilter || selectedActFilter === 'ALL_ACTS')
-        ? 'All Acts / Career'
-        : formatActCode(selectedActFilter, false);
+      const nonDmList = activeModeKey !== 'deathmatch' ? list.filter(m => !m.isDeathmatch) : [];
+      const kpiList = nonDmList.length > 0 ? nonDmList : list;
+      const count = kpiList.length;
 
       document.getElementById('matchesSummaryHeader').textContent =
-        `${officialGames} Matches (${actDisplayName} • ${activeModeLabel})`;
+        `${count} Matches (${activeModeLabel})`;
 
       let wins = 0, totalRW = 0, totalRL = 0, totalRoundsPlayed = 0;
       let totalK = 0, totalD = 0, totalA = 0, totalScore = 0;
@@ -3346,10 +3362,12 @@
 
       const agentAgg = {};
 
-      list.forEach(m => {
+      kpiList.forEach(m => {
         if (m.hasWon) wins++;
-        totalRW += m.roundsWon;
-        totalRL += m.roundsLost;
+        if (!m.isDeathmatch) {
+          totalRW += m.roundsWon;
+          totalRL += m.roundsLost;
+        }
         totalRoundsPlayed += m.roundsPlayed;
         totalK += m.kills;
         totalD += m.deaths;
@@ -3380,50 +3398,6 @@
         ag.hs += m.headshots;
         ag.shots += (m.headshots + m.bodyshots + m.legshots);
       });
-
-      // Scale cumulative match counts (Wins, Losses, Kills, Deaths, Assists, Damage, Hits, Agent Games)
-      // to match the selected Act's official game count & win record from by_season!
-      let count = rawCount;
-      if (useOfficialActTotals && rawCount > 0 && officialGames > rawCount) {
-        const gameScale = officialGames / rawCount;
-        const actWrRatio = selectedActObj ? (selectedActObj.winRate / 100) : (totalCareerGames > 0 ? totalCareerWins / totalCareerGames : 0.5);
-        const killScale = gameScale * (0.85 + actWrRatio * 0.35);
-        const deathScale = gameScale * (1.15 - actWrRatio * 0.30);
-
-        // Distinct accuracy hit zone modifiers for All Acts vs individual Acts so Head %, Body %, and Legs % update on every selection
-        const actSeed = selectedActObj ? hashActSeed(selectedActObj.code) : 101;
-        const hsMod = selectedActFilter === 'ALL_ACTS' ? 1.12 : (0.88 + ((actSeed % 35) / 100));
-        const bsMod = selectedActFilter === 'ALL_ACTS' ? 0.96 : (0.92 + (((actSeed >> 3) % 22) / 100));
-        const lsMod = selectedActFilter === 'ALL_ACTS' ? 0.90 : (0.85 + (((actSeed >> 6) % 38) / 100));
-
-        count = officialGames;
-        wins = officialWins;
-        totalK = Math.round(totalK * killScale);
-        totalD = Math.max(1, Math.round(totalD * deathScale));
-        totalA = Math.round(totalA * gameScale);
-        totalDmgMade = Math.round(totalDmgMade * killScale);
-        totalDmgRecv = Math.round(totalDmgRecv * deathScale);
-        totalScore = Math.round(totalScore * killScale);
-        totalRoundsPlayed = Math.max(1, Math.round(totalRoundsPlayed * gameScale));
-        totalRW = Math.round(totalRoundsPlayed * actWrRatio);
-        totalRL = Math.max(0, totalRoundsPlayed - totalRW);
-        totalHS = Math.round(totalHS * killScale * hsMod);
-        totalBS = Math.round(totalBS * killScale * bsMod);
-        totalLS = Math.round(totalLS * killScale * lsMod);
-
-        Object.values(agentAgg).forEach(ag => {
-          ag.played = Math.max(1, Math.round(ag.played * gameScale));
-          ag.wins = Math.min(ag.played, Math.max(0, Math.round(ag.played * actWrRatio)));
-          ag.k = Math.round(ag.k * killScale);
-          ag.d = Math.max(1, Math.round(ag.d * deathScale));
-          ag.a = Math.round(ag.a * gameScale);
-          ag.dmg = Math.round(ag.dmg * killScale);
-          ag.score = Math.round(ag.score * killScale);
-          ag.rounds = Math.max(1, Math.round(ag.rounds * gameScale));
-          ag.hs = Math.round(ag.hs * killScale);
-          ag.shots = Math.max(1, Math.round(ag.shots * killScale));
-        });
-      }
 
       const losses = count - wins;
       const winRate = count > 0 ? (wins * 100) / count : 0;

@@ -11,7 +11,7 @@ start chrome "%~dp0web\index.html" 2>nul || start "" "%~dp0web\index.html"
 where javac >nul 2>nul
 if %errorlevel% equ 0 (
     if not exist out mkdir out
-    javac -d out src\model\*.java src\utility\*.java src\service\*.java src\main\*.java
+    javac -encoding UTF-8 -d out src\model\*.java src\utility\*.java src\service\*.java src\main\*.java
     if %errorlevel% equ 0 (
         echo [JAVA BACKEND] Starting Java HTTP Server on http://localhost:8080 ...
         java -cp out main.ValorantWebServer

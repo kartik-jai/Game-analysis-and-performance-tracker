@@ -53,18 +53,20 @@ valorant tracker/
 The `model` package holds the **data classes (POJOs — Plain Old Java Objects)**. It demonstrates **Encapsulation** (keeping variables `private` and accessing them via `public` getters and setters).
 
 ### 2.1 `src/model/MatchStats.java`
-* **What it is:** Represents a **single Valorant match** played by a user.
+* **What it is:** Represents a **single Valorant match** played by a user, along with complete inner data models for the full Tracker.gg profile experience.
 * **Key Fields Stored:**
   * Player Identity: `matchId`, `playerName` (e.g., `Karthikkkk`), `playerTag` (e.g., `1795`), `region` (`ap`)
-  * Match Info: `mapName` (`Ascent`, `Bind`, etc.), `agentName` (`Jett`, `Reyna`, etc.), `gameMode` (`Competitive`, `Unrated`, `Deathmatch`), `primaryWeapon` (`Vandal`, `Phantom`, `Operator`), `matchDate`
-  * Combat Stats: `kills`, `deaths`, `assists`, `roundsWon`, `roundsLost`, `headshots`, `bodyshots`, `legshots`, `averageCombatScore` (ACS)
+  * Match Info: `mapName` (`Ascent`, `Bind`, etc.), `agentName` (`Jett`, `Reyna`, etc.), `agentIconUrl`, `gameMode` (`Competitive`, `Unrated`, `Deathmatch`), `primaryWeapon` (`Vandal`, `Phantom`, `Operator`), `matchDate`, `seasonCode` (`e11a6`), `cluster` (`Mumbai`), `placementLabel` (`1st Place`, `MVP`)
+  * Combat Stats: `kills`, `deaths`, `assists`, `roundsWon`, `roundsLost`, `headshots`, `bodyshots`, `legshots`, `averageCombatScore` (ACS), `damageMade`, `damageReceived`
+  * Rich Match Collections: `List<WeaponEvent> weaponEvents` (per-weapon kills, headshots, bodyshots, legshots, and weapon icon URLs) and `List<ScoreboardPlayer> scoreboard` (full 10-player post-match scoreboard).
+* **Inner Domain Classes Inside `MatchStats.java`:**
+  * `WeaponEvent` — Tracks weapon name, weapon category (`Assault Rifles`, `SMGs`, `Sniper Rifles`, `Sidearms`, `Shotguns`, `Heavy Weapons`), icon URL, kills, and hitbox breakdown (`headshots`, `bodyshots`, `legshots`).
+  * `ScoreboardPlayer` — Holds each of the 10 players in a match (`name`, `tag`, `team`, `agent`, `tierPatched`, `acs`, `kills`, `deaths`, `assists`, `adr`, `hsPct`).
+  * `ActSeasonRecord` — Holds an official Valorant Episode & Act competitive record (`seasonCode`, `displayName`, `wins`, `losses`, `games`, `finalRankPatched`, `rankIconUrl`, `peakRank`).
+  * `PlayerProfileData` — Aggregates the player's account header (`accountLevel`, `cardSmallUrl`, `cardWideUrl`), MMR rating (`currentRank`, `currentRr`, `lastMmChange`, `peakRank`, `peakSeason`), `List<ActSeasonRecord> acts`, and `List<MatchStats> matches`.
 * **Key Methods Inside:**
-  * `getKdRatio()` — Calculates $\text{Kills} / \text{Deaths}$ (safely handles `deaths == 0` so the program never crashes with a `DivideByZero` error).
-  * `getKdaRatio()` — Calculates $(\text{Kills} + \text{Assists}) / \text{Deaths}$.
-  * `getHeadshotPercentage()`, `getBodyshotPercentage()`, `getLegshotPercentage()` — Calculates what percentage of total shots hit the head, body, or legs.
-  * `getRoundWinRate()` — Calculates $(\text{Rounds Won} / \text{Total Rounds}) \times 100$.
-  * `isMatchWon()` — Returns `true` if `roundsWon > roundsLost`.
-* **OOP Concept Demonstrated:** **Encapsulation** and domain-driven calculated properties.
+  * `getKdRatio()`, `getKdaRatio()`, `getAdr()` (Damage/Round), `getDdDeltaPerRound()` ($\text{Damage Made} - \text{Damage Received}$ per round), `getHeadshotPercentage()`, `getBodyshotPercentage()`, `getLegshotPercentage()`, `getRoundWinRate()`, `isMatchWon()`.
+* **OOP Concept Demonstrated:** **Encapsulation**, nested domain models, and domain-driven calculated properties.
 
 ---
 
@@ -102,16 +104,16 @@ The `service` package contains the **core logic** of the application: fetching d
 ---
 
 ### 3.2 `src/service/HenrikValorantApiService.java`
-* **What it is:** A concrete class that `implements GameApiClient` to fetch **live Valorant match history over the internet** using the HenrikDev Valorant REST API (`https://api.henrikdev.xyz/valorant/v3/matches/{region}/{name}/{tag}`).
+* **What it is:** A concrete class that `implements GameApiClient` to fetch **live Valorant profile, MMR, Act history, and match data over the internet** using the HenrikDev Valorant REST API.
 * **Key Features & Methods:**
   * Uses **Java 11+ `HttpClient`, `HttpRequest`, and `HttpResponse`** with a 15-second timeout and `Authorization` header carrying your `HDEV-...` API key.
-  * **Robust Network Exception Handling:** Checks HTTP status codes:
-    * `200 OK` -> Parses the JSON response into a `List<MatchStats>`.
-    * `401 / 403` -> Throws `ApiException` for an invalid or missing API key.
-    * `404` -> Throws `ApiException` if the Riot ID or Region is not found.
-    * `429` -> Throws `ApiException` if the API rate limit is exceeded.
-    * Also catches `HttpTimeoutException` and `ConnectException` (when internet is disconnected).
-  * `parseHenrikV3Json(...)` — Extracts match metadata, player kills/deaths/assists, headshots/bodyshots/legshots, and round scores from the JSON response without requiring third-party JSON JAR libraries.
+  * **`fetchFullProfileParallel(playerName, playerTag, region, modeFilter)`:** Replicates the website's parallel progressive backend using `CompletableFuture.supplyAsync(...)` to fire 4 REST endpoints **simultaneously in parallel**:
+    * `GET /valorant/v1/account/{name}/{tag}` -> Parses `account_level`, `region`, `card.small`, and `card.wide`.
+    * `GET /valorant/v2/mmr/{region}/{name}/{tag}` -> Parses `current_data` (Current Rating, RR, Last Match RR Change), `highest_rank` (Peak Rating & Season), and `by_season` (official `wins`, `losses`, `number_of_games`, and `final_rank_patched` for every Episode & Act).
+    * `GET /valorant/v1/stored-matches/{region}/{name}/{tag}` -> Fast lightweight stored match history across Acts.
+    * `GET /valorant/v3/matches/{region}/{name}/{tag}?size=10` -> Full 10-player post-match scoreboards (`players.all_players`), `damage_made`, `damage_received`, and round-by-round weapon kills (`kills[].damage_weapon_name` and `damage_weapon_assets.display_icon`).
+  * **`buildActSpecificMatches(...)`:** Filters or deterministically synthesizes Act-specific matches, accuracy hitbox shifts, and weapon kill totals when the user switches to any historical Episode/Act in the Desktop GUI.
+  * **Robust Network Exception Handling:** Checks HTTP status codes (`200`, `401/403`, `404`, `429`) and catches `HttpTimeoutException` and `ConnectException` via `ApiException`.
 
 ---
 
@@ -182,18 +184,23 @@ The `main` package contains the entry points (`public static void main(String[] 
 ---
 
 ### 5.2 `src/main/ValorantTrackerApp.java`
-* **What it is:** The **native Java Swing Desktop GUI (`extends JFrame`)** and **CLI (Command-Line Interface)** entry point.
+* **What it is:** The **native Java Swing Desktop GUI (`extends JFrame`)** and **CLI (Command-Line Interface)** entry point, engineered as a **1:1 replica of the Tracker.gg Chrome Website Frontend and Backend**.
 * **What it does:**
-  * Builds a Valorant-themed dark desktop interface with KPI cards, a Riot ID input bar, an API provider switcher dropdown, a `JTabbedPane` with 3 tabs, and styled `JTable` views for SQL match history and Agent performance.
-  * Also supports a terminal mode (`java -cp out main.ValorantTrackerApp --cli`) that prints a complete formatted analytics report to the console.
+  * **Stage 1 — Landing Search Portal (`CARD_LANDING` in `CardLayout`):** Opens first with the Tracker.gg Hero Search Portal asking for **Riot ID (Game Name)**, **#Hash Tagline**, and **Region (`AP`, `NA`, `EU`, `KR`, `LATAM`, `BR`)** with randomized gamer placeholders (`ShadowViper`, `PhantomAce`, `RadiantJett`, etc.) before user input.
+  * **Stage 2 — Full Tracker.gg Main Dashboard (`CARD_DASHBOARD`):**
+    * **Top Navigation & Hero Banner:** Features `← Change Player`, inline Riot ID/#Tag search, live player card avatar, wide player card background banner, `VALORANT // COMPETITIVE PROFILE`, Region badge, Level badge, Current Rank pill, and 5 navigation tabs (**`Overview`**, **`Matches`**, **`Acts & Seasons`**, **`Agents`**, **`Weapons`**).
+    * **Act / Season Dropdown & 11 Game Mode Filter Pills:** Synchronizes all panels across every Episode & Act (`EP11 : ACT 6`, `EP11 : ACT 5`, ..., `All Acts / Career`) and all 11 Valorant Game Modes (`All Modes`, `Competitive`, `Unrated`, `Swiftplay`, `Deathmatch`, `Team Deathmatch`, `Spike Rush`, `Escalation`, `Replication`, `Premier`, `Custom`).
+    * **Left Sidebar Column:** Renders the **Rating Card** (Current Rating, RR, Peak Rating, Act Win/Loss Record), **Act Ranks List** (clickable to switch Acts), **Accuracy Hitbox Dummy Card** (with per-Act `Head %`, `Body %`, `Legs %` and hit counts), and **Top Weapons List** (with High-DPI Multi-Step Bicubic Super-Sampled metallic silver weapon silhouettes via `HiDpiIcon`, weapon category, vector Bezier mini human body dummy hitbox diagram, and scaled Act Kills).
+    * **Right Main Column:** Renders the **Match Performance Overview** (4 large rounded KPI cards with left vertical accent bars + 8 clean secondary stat cells including `ADR`, `K/D`, `HS%`, `Win %`, `ACS`, `DDΔ/Round`, `KAD`, `Kills/Round`, `Round Win %` calculated from 100% un-distorted match statistics), the **Match-by-Match Trend Chart**, **Played Agents Breakdown**, and **Recent Matches** with expandable 10-player post-match scoreboard drawers.
+    * **Zero-Pixelation High-DPI Engine (`HiDpiIcon` & Vector UI Components):** Detects the monitor's hardware DPI transform scale (`100%`, `125%`, `150%`, `200%`), progressively halves full-resolution `512x512` Valorant CDN assets with bicubic interpolation down to exact physical device pixels, and uses vector Java2D components (`TrnLogoBadge`, `NavTabButton`, `ModePillButton`, `RoundedCardPanel`, `TrackerScrollBarUI`).
+  * **CLI Mode:** Also supports terminal execution (`java -cp out main.ValorantTrackerApp --cli` or `run-cli.bat`) that prints a complete formatted analytics report to the console.
 
 ---
 
 ### 5.3 `src/main/TrendChartPanel.java`
-* **What it is:** A custom Java Swing component (`extends JPanel`) that overrides `paintComponent(Graphics g)` and uses **`java.awt.Graphics2D`** with anti-aliasing to draw custom charts in the native desktop app:
-  1. K/D Ratio & Headshot % Multi-Line Trend Graph
-  2. Round Win Rate % Bar Chart (green for wins, crimson red for losses)
-  3. Horizontal Stacked Weapon Hit Accuracy Bar (Headshots vs Bodyshots vs Legshots)
+* **What it is:** A custom Java Swing component (`extends JPanel`) that overrides `paintComponent(Graphics g)` and uses **`java.awt.Graphics2D`** with anti-aliasing to draw custom Tracker.gg visualizations in the native desktop app:
+  1. **Tracker.gg Match-by-Match Trend Chart (`Mode.TREND_LINE_CHART`)** — Overlays the Teal K/D Ratio curve (`#00f5d4`), Crimson Red Headshot % curve (`#ff4655`), and subtle Green/Red Round Win % background bars across recent matches.
+  2. **Tracker.gg Human Target Hitbox Dummy (`HitboxDummyPanel`)** — Custom Java2D vector renderer that draws the human target dummy (Head, Torso/Arms, and Legs highlighted in Crimson Red, Teal, and Gold) in both **Large Accuracy Card Mode** and **Mini Weapon Row Mode** alongside `Head %`, `Body %`, and `Legs %`.
 
 ---
 
@@ -246,8 +253,10 @@ The `main` package contains the entry points (`public static void main(String[] 
 
 ---
 
-### 6.5 `run.bat`
-* **What it is:** A one-click Windows batch script that opens the Chrome Web Dashboard (`web/index.html`) in Google Chrome and compiles/starts the Java backend (`javac` -> `java -cp out main.ValorantWebServer`).
+### 6.5 `run.bat`, `run-desktop.bat` & `run-cli.bat`
+* **`run.bat`:** One-click launcher that opens the Chrome Web Dashboard (`web/index.html`) in Google Chrome and compiles/starts the Java HTTP backend (`main.ValorantWebServer`).
+* **`run-desktop.bat`:** One-click launcher that compiles all 4 Java packages (`javac`) and launches the native Tracker.gg-styled **Java Swing Desktop GUI (`main.ValorantTrackerApp`)**.
+* **`run-cli.bat`:** One-click launcher that compiles the Java packages and runs the **Command-Line Interface (`main.ValorantTrackerApp --cli`)** inside the terminal.
 
 ---
 
