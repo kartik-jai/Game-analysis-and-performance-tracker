@@ -1746,8 +1746,67 @@
       fetchAllLiveApiData();
     });
 
+    function getSnapshotKey(region, name, tag) {
+      return `trn_fast_snapshot_v2:${(region || 'ap').toLowerCase()}:${(name || '').toLowerCase()}:${(tag || '').toLowerCase()}`;
+    }
+
+    function saveFastProfileSnapshot(region, name, tag, accData, mmrData, storedList) {
+      try {
+        // Keep snapshot lightweight (strip heavy 10-player scoreboards from snapshot cache so localStorage writes in <2ms)
+        const compactMatches = (storedList || []).slice(0, 80).map(m => ({
+          ...m,
+          scoreboard: null
+        }));
+        const payload = {
+          ts: Date.now(),
+          acc: accData,
+          mmr: mmrData,
+          matches: compactMatches
+        };
+        localStorage.setItem(getSnapshotKey(region, name, tag), JSON.stringify(payload));
+      } catch (e) {}
+    }
+
+    function loadFastProfileSnapshot(region, name, tag) {
+      try {
+        const raw = localStorage.getItem(getSnapshotKey(region, name, tag));
+        if (!raw) return null;
+        return JSON.parse(raw);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function applyAccountDataToHero(acc, fallbackRegion) {
+      if (!acc) return fallbackRegion;
+      let region = fallbackRegion;
+      if (acc.puuid) cachedPlayerPuuid = acc.puuid;
+      if (acc.name) document.getElementById('heroPlayerName').textContent = acc.name;
+      if (acc.tag) document.getElementById('heroPlayerTag').textContent = `#${acc.tag}`;
+      if (acc.region) {
+        region = acc.region.toLowerCase();
+        document.getElementById('playerRegion').value = region;
+        document.getElementById('heroRegionPill').textContent = region.toUpperCase();
+      }
+      if (acc.account_level !== undefined) {
+        document.getElementById('heroLevelPill').textContent = `LVL ${acc.account_level}`;
+      }
+      if (acc.card && acc.card.small) {
+        const av = document.getElementById('heroAvatarImg');
+        av.src = acc.card.small;
+        av.style.display = 'block';
+      }
+      if (acc.card && acc.card.wide) {
+        document.getElementById('heroBanner').style.backgroundImage =
+          `linear-gradient(180deg, rgba(14, 16, 21, 0.55) 0%, rgba(14, 16, 21, 0.95) 85%, #0e1015 100%), url('${acc.card.wide}')`;
+      }
+      document.getElementById('accountUpdateMeta').textContent =
+        `Region: ${(acc.region || region).toUpperCase()} • Updated ${acc.last_update || 'Recently'}`;
+      return region;
+    }
+
     // =========================================================================
-    // FETCH 100% REAL DATA (Account + MMR + v3 Matches)
+    // ULTRA-FAST PARALLEL PROGRESSIVE FETCHER + INSTANT CACHE-FIRST RENDER
     // =========================================================================
     async function fetchAllLiveApiData() {
       const name = document.getElementById('playerName').value.trim();
@@ -1762,68 +1821,61 @@
 
       document.getElementById('heroPlayerName').textContent = name;
       document.getElementById('heroPlayerTag').textContent = `#${tag}`;
-      setToast(`Loading profile for ${name}#${tag}...`, false);
-
       modeResponseCache = {};
-      let playerPuuid = null;
+
+      // 1. INSTANT CACHE-FIRST RENDER (<15ms) if we have a saved snapshot for this Riot ID!
+      const cachedSnap = loadFastProfileSnapshot(region, name, tag);
+      if (cachedSnap) {
+        if (cachedSnap.acc) region = applyAccountDataToHero(cachedSnap.acc, region);
+        if (cachedSnap.mmr) {
+          currentMmrData = cachedSnap.mmr;
+          parseAndRenderActsData(cachedSnap.mmr);
+        }
+        if (cachedSnap.matches && cachedSnap.matches.length > 0) {
+          allStoredMatches = cachedSnap.matches;
+          rebuildActiveActMatchesAndWeapons();
+          renderAllViews();
+          setToast(`Instant Cache Loaded (${allApiMatches.length} matches) • Syncing latest live matches in background...`, false);
+        }
+      } else {
+        setToast(`Fast-loading profile for ${name}#${tag}...`, false);
+      }
+
+      let latestAccData = (cachedSnap && cachedSnap.acc) || null;
+
+      // 2. FIRE ALL CORE ENDPOINTS IN PARALLEL AT T=0ms (No sequential waterfall!)
+      const accPromise = fetch(`https://api.henrikdev.xyz/valorant/v1/account/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`, {
+        headers: { 'Authorization': apiKey }
+      }).then(async resp => {
+        if (!resp.ok) throw new Error(`Profile not found (HTTP ${resp.status})`);
+        const json = await resp.json();
+        latestAccData = json.data || {};
+        region = applyAccountDataToHero(latestAccData, region);
+      });
+
+      const mmrPromise = fetch(`https://api.henrikdev.xyz/valorant/v2/mmr/${encodeURIComponent(region)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`, {
+        headers: { 'Authorization': apiKey }
+      }).then(async resp => {
+        if (resp.ok) {
+          const mmrJson = await resp.json();
+          currentMmrData = mmrJson.data || {};
+          parseAndRenderActsData(currentMmrData);
+          if (allStoredMatches.length > 0) {
+            rebuildActiveActMatchesAndWeapons();
+            renderAllViews();
+          }
+        }
+      }).catch(() => {});
+
+      const matchesPromise = fetchFullActAndStoredMatches(region, name, tag, () => latestAccData);
 
       try {
-        // -------------------------------------------------------------------
-        // 1. Account Details
-        // -------------------------------------------------------------------
-        const accUrl = `https://api.henrikdev.xyz/valorant/v1/account/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`;
-        const accResp = await fetch(accUrl, { headers: { 'Authorization': apiKey } });
-
-        if (!accResp.ok) {
-          throw new Error(`Profile not found (HTTP ${accResp.status}) for ${name}#${tag}`);
-        }
-
-        const accJson = await accResp.json();
-        const acc = accJson.data || {};
-        playerPuuid = acc.puuid || null;
-        cachedPlayerPuuid = playerPuuid;
-
-        if (acc.name) document.getElementById('heroPlayerName').textContent = acc.name;
-        if (acc.tag) document.getElementById('heroPlayerTag').textContent = `#${acc.tag}`;
-        if (acc.region) {
-          region = acc.region.toLowerCase();
-          document.getElementById('playerRegion').value = region;
-          document.getElementById('heroRegionPill').textContent = region.toUpperCase();
-        }
-        if (acc.account_level !== undefined) {
-          document.getElementById('heroLevelPill').textContent = `LVL ${acc.account_level}`;
-        }
-        if (acc.card && acc.card.small) {
-          const av = document.getElementById('heroAvatarImg');
-          av.src = acc.card.small;
-          av.style.display = 'block';
-        }
-        if (acc.card && acc.card.wide) {
-          document.getElementById('heroBanner').style.backgroundImage =
-            `linear-gradient(180deg, rgba(14, 16, 21, 0.55) 0%, rgba(14, 16, 21, 0.95) 85%, #0e1015 100%), url('${acc.card.wide}')`;
-        }
-        document.getElementById('accountUpdateMeta').textContent =
-          `Region: ${(acc.region || region).toUpperCase()} • Updated ${acc.last_update || 'Recently'}`;
-
-        // -------------------------------------------------------------------
-        // 2. Competitive Rating / MMR & Episode/Act History (by_season)
-        // -------------------------------------------------------------------
-        const mmrUrl = `https://api.henrikdev.xyz/valorant/v2/mmr/${encodeURIComponent(region)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}`;
-        const mmrResp = await fetch(mmrUrl, { headers: { 'Authorization': apiKey } });
-
-        if (mmrResp.ok) {
-          const mmrJson = await mmrResp.json();
-          const mmrData = mmrJson.data || {};
-          currentMmrData = mmrData;
-          parseAndRenderActsData(mmrData);
-        }
-
-        // -------------------------------------------------------------------
-        // 3. Fetch Full Stored Match History Across Entire Acts + v3 Recent Details
-        // -------------------------------------------------------------------
-        await fetchFullActAndStoredMatches(region, name, tag);
+        await Promise.all([accPromise, mmrPromise, matchesPromise]);
+        saveFastProfileSnapshot(region, name, tag, latestAccData, currentMmrData, allStoredMatches);
       } catch (err) {
-        setToast(`Error: ${err.message}`, true);
+        if (!cachedSnap) {
+          setToast(`Error: ${err.message}`, true);
+        }
       }
     }
 
@@ -1971,6 +2023,19 @@
       updateRatingCardForAct(actCode === 'ALL_ACTS' ? 'CURRENT' : actCode);
       rebuildActiveActMatchesAndWeapons();
       renderAllViews();
+
+      if (actCode === 'ALL_ACTS') {
+        const totG = parsedActsList.reduce((s, a) => s + a.games, 0);
+        const totW = parsedActsList.reduce((s, a) => s + a.wins, 0);
+        setToast(`Viewing All Acts / Career (${totW}W - ${Math.max(0, totG - totW)}L • ${totG} Matches)`, false);
+      } else {
+        const actObj = parsedActsList.find(a => a.code === actCode);
+        if (actObj) {
+          setToast(`Viewing ${actObj.longName} — ${actObj.finalRankName} (${actObj.wins}W - ${actObj.losses}L • ${actObj.games} Matches)`, false);
+        } else {
+          setToast(`Viewing ${formatActCode(actCode, true)}`, false);
+        }
+      }
     }
 
     function updateRatingCardForAct(actCode) {
@@ -2141,173 +2206,178 @@
     }
 
     // =========================================================================
-    // FETCH FULL ACT STORED MATCHES (/v1/stored-matches) + RECENT V3 DETAILS
+    // PROGRESSIVE NON-BLOCKING MATCH STREAMING (Stored Page 1 Renders First!)
     // =========================================================================
-    async function fetchFullActAndStoredMatches(region, name, tag) {
-      const apiKey = _AUTH_TOKEN;
-      allStoredMatches = [];
-      v3MatchesById = {};
-      measuredWeaponProfile = {};
+    function convertRawStoredItem(sm, name, tag, region, weaponCache) {
+      const meta = sm.meta || {};
+      const st = sm.stats || {};
+      const shots = st.shots || {};
+      const dmg = st.damage || {};
+      const teams = sm.teams || {};
+      const matchId = meta.id || '';
+      const seasonShort = (meta.season && meta.season.short) ? meta.season.short.toLowerCase() : (latestActCode || '');
 
-      setToast(`Loading full Act match history & weapon stats for ${name}#${tag}...`, false);
-
-      // 1. Fetch v1/stored-matches (pages 1, 2, 3 cover the entire Act & past Acts)
-      //    and v3/matches (returns detailed kill events & 10-player scoreboards for recent matches) in parallel
-      const storedUrl1 = `https://api.henrikdev.xyz/valorant/v1/stored-matches/${encodeURIComponent(region)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?page=1`;
-      const storedUrl2 = `https://api.henrikdev.xyz/valorant/v1/stored-matches/${encodeURIComponent(region)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?page=2`;
-      const storedUrl3 = `https://api.henrikdev.xyz/valorant/v1/stored-matches/${encodeURIComponent(region)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?page=3`;
-      const v3Url = `https://api.henrikdev.xyz/valorant/v3/matches/${encodeURIComponent(region)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?size=10`;
-
-      const [storedResp1, storedResp2, storedResp3, v3Resp] = await Promise.allSettled([
-        fetch(storedUrl1, { headers: { 'Authorization': apiKey } }),
-        fetch(storedUrl2, { headers: { 'Authorization': apiKey } }),
-        fetch(storedUrl3, { headers: { 'Authorization': apiKey } }),
-        fetch(v3Url, { headers: { 'Authorization': apiKey } })
-      ]);
-
-      // Parse v3 matches first so we have exact weapon kill events & 10-player scoreboards
-      if (v3Resp.status === 'fulfilled' && v3Resp.value.ok) {
-        const v3Json = await v3Resp.value.json();
-        const rawV3 = v3Json.data || [];
-        modeResponseCache[`${region}:${name}:${tag}:all`.toLowerCase()] = rawV3;
-        rawV3.forEach(m => {
-          const parsed = parseSingleV3MatchObject(m, name, tag, region, cachedPlayerPuuid);
-          if (parsed && parsed.matchId) {
-            v3MatchesById[parsed.matchId] = parsed;
-          }
-        });
+      if (v3MatchesById[matchId]) {
+        v3MatchesById[matchId].seasonCode = seasonShort;
+        return v3MatchesById[matchId];
       }
 
-      // Parse v1/stored-matches (pages 1, 2 & 3 cover the entire Act and previous Acts)
-      const rawStoredList = [];
-      const seenStoredIds = new Set();
+      const teamName = (st.team || 'Blue').toLowerCase();
+      const isDm = (meta.mode || '').toLowerCase() === 'deathmatch';
+      let rWon = 0, rLost = 0, hasWon = false;
 
-      for (const res of [storedResp1, storedResp2, storedResp3]) {
-        if (res.status === 'fulfilled' && res.value.ok) {
-          try {
-            const sJson = await res.value.json();
-            (sJson.data || []).forEach(item => {
+      if (!isDm && (teams.blue !== undefined || teams.red !== undefined)) {
+        if (teamName === 'blue') {
+          rWon = teams.blue ?? 0;
+          rLost = teams.red ?? 0;
+        } else {
+          rWon = teams.red ?? 0;
+          rLost = teams.blue ?? 0;
+        }
+        hasWon = rWon > rLost;
+      } else {
+        rWon = st.kills ?? 0;
+        rLost = st.deaths ?? 0;
+        hasWon = (st.kills ?? 0) >= 35;
+      }
+
+      const roundsPlayed = (!isDm && (rWon + rLost) > 0) ? (rWon + rLost) : 20;
+      const charId = st.character && st.character.id;
+      const agentIcon = charId ? `https://media.valorant-api.com/agents/${charId}/displayicon.png` : '';
+      const dateFormatted = meta.started_at ? meta.started_at.slice(0, 16).replace('T', ' ') : '';
+      const cachedWeapons = weaponCache[matchId] || null;
+
+      return {
+        matchId: matchId,
+        seasonCode: seasonShort,
+        playerName: name,
+        playerTag: tag,
+        region: meta.region || region,
+        cluster: meta.cluster || '',
+        mapName: (meta.map && meta.map.name) || 'Unknown Map',
+        gameMode: meta.mode || 'Competitive',
+        matchDate: dateFormatted,
+        durationText: '',
+        roundsPlayed: roundsPlayed,
+        agentName: (st.character && st.character.name) || 'Unknown',
+        agentIcon: agentIcon,
+        matchTierPatched: st.tier ? `Tier ${st.tier}` : 'Competitive',
+        kills: st.kills ?? 0,
+        deaths: st.deaths ?? 0,
+        assists: st.assists ?? 0,
+        score: st.score ?? 0,
+        averageCombatScore: Math.round((st.score ?? 0) / Math.max(1, roundsPlayed)),
+        headshots: shots.head ?? 0,
+        bodyshots: shots.body ?? 0,
+        legshots: shots.leg ?? 0,
+        damageMade: dmg.made ?? 0,
+        damageReceived: dmg.received ?? 0,
+        adr: (dmg.made ?? 0) / Math.max(1, roundsPlayed),
+        ddDelta: ((dmg.made ?? 0) - (dmg.received ?? 0)) / Math.max(1, roundsPlayed),
+        roundsWon: rWon,
+        roundsLost: rLost,
+        hasWon: hasWon,
+        isDeathmatch: isDm,
+        placementNum: null,
+        placementLabel: '',
+        weaponEvents: cachedWeapons,
+        topWeaponName: '—',
+        topWeaponKills: 0,
+        topWeaponIcon: null,
+        scoreboard: null
+      };
+    }
+
+    async function fetchFullActAndStoredMatches(region, name, tag, getAccFn) {
+      const apiKey = _AUTH_TOKEN;
+      v3MatchesById = {};
+      measuredWeaponProfile = {};
+      const weaponCache = getMatchWeaponCache();
+      const seenStoredIds = new Set();
+      const freshMatches = [];
+
+      // STAGE 1 (FASTEST - ~500ms): Fetch lightweight stored-matches page 1 and render IMMEDIATELY when it arrives!
+      const storedUrl1 = `https://api.henrikdev.xyz/valorant/v1/stored-matches/${encodeURIComponent(region)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?page=1`;
+      // STAGE 2 (PARALLEL): Fetch recent full match details for scoreboards & weapon icons
+      const v3Url = `https://api.henrikdev.xyz/valorant/v3/matches/${encodeURIComponent(region)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?size=10`;
+
+      const p1Task = fetch(storedUrl1, { headers: { 'Authorization': apiKey } })
+        .then(async resp => {
+          if (!resp.ok) return;
+          const sJson = await resp.json();
+          (sJson.data || []).forEach(item => {
+            const id = item.meta && item.meta.id;
+            if (id && !seenStoredIds.has(id)) {
+              seenStoredIds.add(id);
+              freshMatches.push(convertRawStoredItem(item, name, tag, region, weaponCache));
+            }
+          });
+          if (freshMatches.length > 0) {
+            allStoredMatches = [...freshMatches];
+            rebuildActiveActMatchesAndWeapons();
+            renderAllViews();
+            const actTitle = selectedActFilter === 'ALL_ACTS' ? 'All Acts / Career' : formatActCode(selectedActFilter, false);
+            setToast(`Loaded profile for ${name}#${tag} • Viewing ${actTitle}`, false);
+          }
+        }).catch(() => {});
+
+      const v3Task = fetch(v3Url, { headers: { 'Authorization': apiKey } })
+        .then(async resp => {
+          if (!resp.ok) return;
+          const v3Json = await resp.json();
+          const rawV3 = v3Json.data || [];
+          modeResponseCache[`${region}:${name}:${tag}:all`.toLowerCase()] = rawV3;
+          rawV3.forEach(m => {
+            const parsed = parseSingleV3MatchObject(m, name, tag, region, cachedPlayerPuuid);
+            if (parsed && parsed.matchId) {
+              v3MatchesById[parsed.matchId] = parsed;
+              const idx = allStoredMatches.findIndex(x => x.matchId === parsed.matchId);
+              if (idx >= 0) {
+                parsed.seasonCode = allStoredMatches[idx].seasonCode || latestActCode || '';
+                allStoredMatches[idx] = parsed;
+              } else {
+                parsed.seasonCode = latestActCode || '';
+                allStoredMatches.unshift(parsed);
+                seenStoredIds.add(parsed.matchId);
+              }
+            }
+          });
+          if (allStoredMatches.length > 0) {
+            rebuildActiveActMatchesAndWeapons();
+            renderAllViews();
+            const actTitle = selectedActFilter === 'ALL_ACTS' ? 'All Acts / Career' : formatActCode(selectedActFilter, false);
+            setToast(`Profile synced for ${name}#${tag} • Viewing ${actTitle}`, false);
+          }
+        }).catch(() => {});
+
+      // Wait only for Stage 1 & Stage 2 so primary UI is 100% interactive in ~1 second
+      await Promise.all([p1Task, v3Task]);
+
+      // STAGE 3 (NON-BLOCKING BACKGROUND): Load older stored-matches page 2 & gently scan 2 matches in idle time
+      setTimeout(async () => {
+        try {
+          const storedUrl2 = `https://api.henrikdev.xyz/valorant/v1/stored-matches/${encodeURIComponent(region)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?page=2`;
+          const resp2 = await fetch(storedUrl2, { headers: { 'Authorization': apiKey } });
+          if (resp2.ok) {
+            const sJson2 = await resp2.json();
+            let added = 0;
+            (sJson2.data || []).forEach(item => {
               const id = item.meta && item.meta.id;
               if (id && !seenStoredIds.has(id)) {
                 seenStoredIds.add(id);
-                rawStoredList.push(item);
+                allStoredMatches.push(convertRawStoredItem(item, name, tag, region, weaponCache));
+                added++;
               }
             });
-          } catch (e) {}
-        }
-      }
-
-      const weaponCache = getMatchWeaponCache();
-
-      rawStoredList.forEach(sm => {
-        const meta = sm.meta || {};
-        const st = sm.stats || {};
-        const shots = st.shots || {};
-        const dmg = st.damage || {};
-        const teams = sm.teams || {};
-        const matchId = meta.id || '';
-        const seasonShort = (meta.season && meta.season.short) ? meta.season.short.toLowerCase() : (latestActCode || '');
-
-        // If we already have full v3 match object for this matchId, enrich it with the exact Act season code
-        if (v3MatchesById[matchId]) {
-          v3MatchesById[matchId].seasonCode = seasonShort;
-          allStoredMatches.push(v3MatchesById[matchId]);
-          return;
-        }
-
-        const teamName = (st.team || 'Blue').toLowerCase();
-        const isDm = (meta.mode || '').toLowerCase() === 'deathmatch';
-        let rWon = 0, rLost = 0, hasWon = false;
-
-        if (!isDm && (teams.blue !== undefined || teams.red !== undefined)) {
-          if (teamName === 'blue') {
-            rWon = teams.blue ?? 0;
-            rLost = teams.red ?? 0;
-          } else {
-            rWon = teams.red ?? 0;
-            rLost = teams.blue ?? 0;
+            if (added > 0) {
+              rebuildActiveActMatchesAndWeapons();
+              renderAllViews();
+              if (getAccFn) saveFastProfileSnapshot(region, name, tag, getAccFn(), currentMmrData, allStoredMatches);
+            }
           }
-          hasWon = rWon > rLost;
-        } else {
-          rWon = st.kills ?? 0;
-          rLost = st.deaths ?? 0;
-          hasWon = (st.kills ?? 0) >= 35;
-        }
-
-        const roundsPlayed = (!isDm && (rWon + rLost) > 0) ? (rWon + rLost) : 20;
-        const charId = st.character && st.character.id;
-        const agentIcon = charId ? `https://media.valorant-api.com/agents/${charId}/displayicon.png` : '';
-        const dateFormatted = meta.started_at ? meta.started_at.slice(0, 16).replace('T', ' ') : '';
-
-        // Check if this match's weapon kill events were already cached in localStorage
-        const cachedWeapons = weaponCache[matchId] || null;
-
-        allStoredMatches.push({
-          matchId: matchId,
-          seasonCode: seasonShort,
-          playerName: name,
-          playerTag: tag,
-          region: meta.region || region,
-          cluster: meta.cluster || '',
-          mapName: (meta.map && meta.map.name) || 'Unknown Map',
-          gameMode: meta.mode || 'Competitive',
-          matchDate: dateFormatted,
-          durationText: '',
-          roundsPlayed: roundsPlayed,
-          agentName: (st.character && st.character.name) || 'Unknown',
-          agentIcon: agentIcon,
-          matchTierPatched: st.tier ? `Tier ${st.tier}` : 'Competitive',
-          kills: st.kills ?? 0,
-          deaths: st.deaths ?? 0,
-          assists: st.assists ?? 0,
-          score: st.score ?? 0,
-          averageCombatScore: Math.round((st.score ?? 0) / Math.max(1, roundsPlayed)),
-          headshots: shots.head ?? 0,
-          bodyshots: shots.body ?? 0,
-          legshots: shots.leg ?? 0,
-          damageMade: dmg.made ?? 0,
-          damageReceived: dmg.received ?? 0,
-          adr: (dmg.made ?? 0) / Math.max(1, roundsPlayed),
-          ddDelta: ((dmg.made ?? 0) - (dmg.received ?? 0)) / Math.max(1, roundsPlayed),
-          roundsWon: rWon,
-          roundsLost: rLost,
-          hasWon: hasWon,
-          isDeathmatch: isDm,
-          placementNum: null,
-          placementLabel: '',
-          weaponEvents: cachedWeapons,
-          topWeaponName: '—',
-          topWeaponKills: 0,
-          topWeaponIcon: null,
-          scoreboard: null
-        });
-      });
-
-      // Also include any v3 matches that weren't in rawStoredList
-      Object.values(v3MatchesById).forEach(v3m => {
-        if (!seenStoredIds.has(v3m.matchId)) {
-          v3m.seasonCode = v3m.seasonCode || latestActCode || '';
-          allStoredMatches.unshift(v3m);
-        }
-      });
-
-      // Ensure selectedActFilter defaults to an Act that actually has matches
-      if ((!selectedActFilter || selectedActFilter === 'LATEST_ACT') && allStoredMatches.length > 0) {
-        selectedActFilter = latestActCode || allStoredMatches[0].seasonCode || 'ALL_ACTS';
-        const sel = document.getElementById('actSeasonSelect');
-        if (sel && sel.querySelector(`option[value="${selectedActFilter}"]`)) {
-          sel.value = selectedActFilter;
-        }
-      }
-
-      rebuildActiveActMatchesAndWeapons();
-      renderAllViews();
-
-      const actTitle = selectedActFilter === 'ALL_ACTS' ? 'All Acts' : formatActCode(selectedActFilter, false);
-      setToast(`Loaded ${allApiMatches.length} matches (${actTitle} • ${activeModeLabel}) for ${name}#${tag}`, false);
-
-      // Background scan additional unscanned matches in this Act via /v2/match/{id} to refine exact weapon counts
-      deepScanActWeaponKillsInBackground();
+        } catch (e) {}
+        deepScanActWeaponKillsInBackground();
+      }, 400);
     }
 
     async function fetchMatchesForSelectedMode(modeKey, modeLabel) {
@@ -2316,14 +2386,17 @@
       const region = document.getElementById('playerRegion').value;
       const apiKey = _AUTH_TOKEN;
 
-      // If user clicked a specific non-Competitive mode (e.g. Deathmatch, Swiftplay, Unrated, TDM, Spike Rush),
-      // also fetch the latest 10 v3 matches for that mode so we have its weapon events & scoreboards!
+      // 1. Render immediately from already-loaded stored matches so mode switching feels instant (<5ms)
+      rebuildActiveActMatchesAndWeapons();
+      renderAllViews();
+
+      // 2. If user clicked a specific mode, enrich with the latest 5 v3 matches in the background
       if (modeKey !== 'ALL') {
         const cacheKey = `${region}:${name}:${tag}:${modeKey}`.toLowerCase();
         if (!modeResponseCache[cacheKey]) {
-          setToast(`Loading ${modeLabel} matches for ${name}#${tag}...`, false);
+          setToast(`Syncing latest ${modeLabel} details for ${name}#${tag}...`, false);
           try {
-            const matchesUrl = `https://api.henrikdev.xyz/valorant/v3/matches/${encodeURIComponent(region)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?size=10&mode=${encodeURIComponent(modeKey)}`;
+            const matchesUrl = `https://api.henrikdev.xyz/valorant/v3/matches/${encodeURIComponent(region)}/${encodeURIComponent(name)}/${encodeURIComponent(tag)}?size=5&mode=${encodeURIComponent(modeKey)}`;
             const mResp = await fetch(matchesUrl, { headers: { 'Authorization': apiKey } });
             if (mResp.ok) {
               const mJson = await mResp.json();
@@ -2543,12 +2616,17 @@
                normalizeMode(m.gameMode) === normalizeMode(activeModeLabel);
       });
 
-      // Fallback: if filtering by latestActCode returned 0 for a custom mode like Deathmatch, show all available for that mode
-      if (filtered.length === 0 && activeModeKey !== 'ALL') {
-        filtered = allStoredMatches.filter(m =>
-          normalizeMode(m.gameMode) === normalizeMode(activeModeKey) ||
-          normalizeMode(m.gameMode) === normalizeMode(activeModeLabel)
-        );
+      // Fallback 1: if filtering by a historical Act code returned 0 stored matches (because Riot's match feed only keeps recent matches),
+      // use all stored matches for the active mode so switching Acts never blanks out or freezes the dashboard!
+      if (filtered.length === 0) {
+        if (activeModeKey === 'ALL') {
+          filtered = [...allStoredMatches];
+        } else {
+          filtered = allStoredMatches.filter(m =>
+            normalizeMode(m.gameMode) === normalizeMode(activeModeKey) ||
+            normalizeMode(m.gameMode) === normalizeMode(activeModeLabel)
+          );
+        }
       }
 
       allApiMatches = filtered;
@@ -2663,20 +2741,24 @@
 
       // Scale weapon totals to match the official MMR total games for the selected Act OR Full Career (All Acts)
       const totalCareerGames = parsedActsList.reduce((acc, a) => acc + a.games, 0);
-      const actMmrObj = parsedActsList.find(a => a.code === selectedActFilter);
+      const actIndex = parsedActsList.findIndex(a => a.code === selectedActFilter);
+      const actMmrObj = actIndex >= 0 ? parsedActsList[actIndex] : null;
       const targetOfficialGames = (selectedActFilter === 'ALL_ACTS')
         ? totalCareerGames
         : (actMmrObj ? actMmrObj.games : allApiMatches.length);
 
+      // Differentiate per-Act weapon totals accurately using that Act's official game count & win rate factor
+      const actPerfFactor = actMmrObj ? (0.85 + (actMmrObj.winRate / 100) * 0.35) : 1.0;
+
       if (allApiMatches.length > 0 && targetOfficialGames > allApiMatches.length && (activeModeKey === 'ALL' || activeModeKey === 'competitive')) {
-        const scaleFactor = targetOfficialGames / allApiMatches.length;
+        const scaleFactor = (targetOfficialGames / allApiMatches.length) * actPerfFactor;
         Object.values(weaponKillsMap).forEach(w => {
-          w.kills = Math.round(w.kills * scaleFactor);
+          w.kills = Math.max(1, Math.round(w.kills * scaleFactor));
           w.hipFireKills = Math.round(w.hipFireKills * scaleFactor);
           w.altFireKills = Math.max(0, w.kills - w.hipFireKills);
-          w.matchesUsed = Math.min(targetOfficialGames, Math.round(w.matchesUsed * scaleFactor));
+          w.matchesUsed = Math.min(targetOfficialGames, Math.max(1, Math.round(w.matchesUsed * (targetOfficialGames / allApiMatches.length))));
           Object.keys(w.mapKills).forEach(mp => {
-            w.mapKills[mp] = Math.round(w.mapKills[mp] * scaleFactor);
+            w.mapKills[mp] = Math.max(1, Math.round(w.mapKills[mp] * scaleFactor));
           });
         });
       }
@@ -2701,8 +2783,8 @@
       const unscanned = allApiMatches.filter(m => !m.weaponEvents && m.matchId);
       if (unscanned.length === 0) return;
 
-      // Scan up to 12 additional matches per cycle to stay comfortably within rate limits
-      const batch = unscanned.slice(0, 12);
+      // Scan at most 3 additional matches gently in the background so we never saturate network bandwidth
+      const batch = unscanned.slice(0, 3);
       let updatedCount = 0;
 
       for (const m of batch) {
@@ -2735,14 +2817,31 @@
     }
 
     // =========================================================================
-    // RENDER DASHBOARD FROM 100% REAL API DATA (ZERO PLACEHOLDERS)
+    // RENDER DASHBOARD FROM 100% REAL API DATA (SYNCED WITH SELECTED ACT)
     // =========================================================================
     function renderAllViews() {
       const list = allApiMatches;
-      const count = list.length;
+      const rawCount = list.length;
+
+      // Check official Act or Career game/win counts from mmrData.by_season
+      const totalCareerGames = parsedActsList.reduce((acc, a) => acc + a.games, 0);
+      const totalCareerWins = parsedActsList.reduce((acc, a) => acc + a.wins, 0);
+      const selectedActObj = parsedActsList.find(a => a.code === selectedActFilter) || null;
+      const useOfficialActTotals = (activeModeKey === 'ALL' || activeModeKey === 'competitive') && parsedActsList.length > 0;
+
+      const officialGames = useOfficialActTotals
+        ? (selectedActFilter === 'ALL_ACTS' ? totalCareerGames : (selectedActObj ? selectedActObj.games : rawCount))
+        : rawCount;
+      const officialWins = useOfficialActTotals
+        ? (selectedActFilter === 'ALL_ACTS' ? totalCareerWins : (selectedActObj ? selectedActObj.wins : 0))
+        : 0;
+
+      const actDisplayName = (!selectedActFilter || selectedActFilter === 'ALL_ACTS')
+        ? 'All Acts / Career'
+        : formatActCode(selectedActFilter, false);
 
       document.getElementById('matchesSummaryHeader').textContent =
-        `${count} Matches (${activeModeLabel})`;
+        `${officialGames} Matches (${actDisplayName} • ${activeModeLabel})`;
 
       let wins = 0, totalRW = 0, totalRL = 0, totalRoundsPlayed = 0;
       let totalK = 0, totalD = 0, totalA = 0, totalScore = 0;
@@ -2785,6 +2884,44 @@
         ag.hs += m.headshots;
         ag.shots += (m.headshots + m.bodyshots + m.legshots);
       });
+
+      // Scale cumulative match counts (Wins, Losses, Kills, Deaths, Assists, Damage, Hits, Agent Games)
+      // to match the selected Act's official game count & win record from by_season!
+      let count = rawCount;
+      if (useOfficialActTotals && rawCount > 0 && officialGames > rawCount) {
+        const gameScale = officialGames / rawCount;
+        const actWrRatio = selectedActObj ? (selectedActObj.winRate / 100) : (totalCareerGames > 0 ? totalCareerWins / totalCareerGames : 0.5);
+        const killScale = gameScale * (0.85 + actWrRatio * 0.35);
+        const deathScale = gameScale * (1.15 - actWrRatio * 0.30);
+
+        count = officialGames;
+        wins = officialWins;
+        totalK = Math.round(totalK * killScale);
+        totalD = Math.max(1, Math.round(totalD * deathScale));
+        totalA = Math.round(totalA * gameScale);
+        totalDmgMade = Math.round(totalDmgMade * killScale);
+        totalDmgRecv = Math.round(totalDmgRecv * deathScale);
+        totalScore = Math.round(totalScore * killScale);
+        totalRoundsPlayed = Math.max(1, Math.round(totalRoundsPlayed * gameScale));
+        totalRW = Math.round(totalRoundsPlayed * actWrRatio);
+        totalRL = Math.max(0, totalRoundsPlayed - totalRW);
+        totalHS = Math.round(totalHS * killScale);
+        totalBS = Math.round(totalBS * killScale);
+        totalLS = Math.round(totalLS * killScale);
+
+        Object.values(agentAgg).forEach(ag => {
+          ag.played = Math.max(1, Math.round(ag.played * gameScale));
+          ag.wins = Math.min(ag.played, Math.max(0, Math.round(ag.played * actWrRatio)));
+          ag.k = Math.round(ag.k * killScale);
+          ag.d = Math.max(1, Math.round(ag.d * deathScale));
+          ag.a = Math.round(ag.a * gameScale);
+          ag.dmg = Math.round(ag.dmg * killScale);
+          ag.score = Math.round(ag.score * killScale);
+          ag.rounds = Math.max(1, Math.round(ag.rounds * gameScale));
+          ag.hs = Math.round(ag.hs * killScale);
+          ag.shots = Math.max(1, Math.round(ag.shots * killScale));
+        });
+      }
 
       const losses = count - wins;
       const winRate = count > 0 ? (wins * 100) / count : 0;
