@@ -1202,22 +1202,321 @@
       border-radius: 5px;
       margin: 5px 0 12px;
     }
+
+    /* ==================== LANDING SEARCH PAGE (FIRST PAGE) ==================== */
+    .landing-view {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 32px 20px;
+      background:
+        radial-gradient(circle at 20% 25%, rgba(255, 70, 85, 0.22), transparent 48%),
+        radial-gradient(circle at 80% 75%, rgba(51, 226, 178, 0.14), transparent 50%),
+        linear-gradient(180deg, #0b0d12 0%, #121620 55%, #0e1015 100%);
+      position: relative;
+    }
+
+    .landing-box {
+      max-width: 760px;
+      width: 100%;
+      text-align: center;
+    }
+
+    .landing-logo-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(255, 70, 85, 0.12);
+      border: 1px solid rgba(255, 70, 85, 0.35);
+      padding: 6px 16px;
+      border-radius: 24px;
+      margin-bottom: 20px;
+    }
+
+    .landing-title {
+      font-size: 40px;
+      font-weight: 900;
+      letter-spacing: 0.5px;
+      line-height: 1.15;
+      color: #ffffff;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+
+    .landing-title span {
+      color: var(--trn-red);
+    }
+
+    .landing-subtitle {
+      font-size: 15px;
+      color: var(--text-secondary);
+      max-width: 580px;
+      margin: 0 auto 30px;
+      line-height: 1.55;
+    }
+
+    .landing-search-card {
+      background: rgba(27, 32, 43, 0.92);
+      border: 1px solid var(--trn-border);
+      border-top: 3px solid var(--trn-red);
+      border-radius: 12px;
+      padding: 26px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+      backdrop-filter: blur(12px);
+    }
+
+    .landing-input-row {
+      display: grid;
+      grid-template-columns: 1.5fr auto 0.85fr 0.9fr auto;
+      gap: 10px;
+      align-items: center;
+    }
+
+    @media (max-width: 720px) {
+      .landing-input-row {
+        grid-template-columns: 1fr;
+      }
+      .landing-hash-sep {
+        display: none;
+      }
+      .landing-title {
+        font-size: 28px;
+      }
+    }
+
+    .landing-field-group {
+      text-align: left;
+    }
+
+    .landing-field-lbl {
+      display: block;
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 6px;
+    }
+
+    .landing-input,
+    .landing-select {
+      width: 100%;
+      background: #10141d;
+      border: 1px solid var(--trn-border);
+      border-radius: 7px;
+      padding: 13px 14px;
+      color: #ffffff;
+      font-size: 15px;
+      font-weight: 700;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .landing-input:focus,
+    .landing-select:focus {
+      border-color: var(--trn-red);
+      box-shadow: 0 0 0 3px rgba(255, 70, 85, 0.18);
+    }
+
+    .landing-select option {
+      background: var(--trn-card);
+      color: #fff;
+    }
+
+    .landing-hash-sep {
+      font-size: 22px;
+      font-weight: 900;
+      color: var(--text-muted);
+      padding-top: 20px;
+    }
+
+    .landing-submit-btn {
+      background: var(--trn-red);
+      color: #ffffff;
+      border: none;
+      border-radius: 7px;
+      padding: 14px 24px;
+      font-size: 14px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      cursor: pointer;
+      margin-top: 21px;
+      transition: transform 0.15s, background 0.15s, box-shadow 0.15s;
+      white-space: nowrap;
+      box-shadow: 0 6px 20px rgba(255, 70, 85, 0.35);
+    }
+
+    .landing-submit-btn:hover {
+      background: #ff5b69;
+      transform: translateY(-1px);
+      box-shadow: 0 8px 25px rgba(255, 70, 85, 0.5);
+    }
+
+    .landing-error-msg {
+      color: #ff8a93;
+      font-size: 13px;
+      font-weight: 600;
+      margin-top: 12px;
+      display: none;
+    }
+
+    .landing-recent-row {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .recent-profile-pill {
+      background: #141923;
+      border: 1px solid var(--trn-border);
+      color: var(--text-main);
+      padding: 6px 13px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+
+    .recent-profile-pill:hover {
+      border-color: var(--trn-teal);
+      background: rgba(51, 226, 178, 0.1);
+    }
+
+    .landing-features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+      margin-top: 26px;
+      text-align: left;
+    }
+
+    @media (max-width: 720px) {
+      .landing-features-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .landing-feat-card {
+      background: rgba(27, 32, 43, 0.65);
+      border: 1px solid var(--trn-border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .landing-feat-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: #ffffff;
+      margin-bottom: 5px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .landing-feat-desc {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.45;
+    }
   </style>
 </head>
 <body>
 
+  <!-- ==================== STEP 1: LANDING SEARCH PAGE (RIOT ID & #HASH) ==================== -->
+  <section id="landingSearchPage" class="landing-view">
+    <div class="landing-box">
+      <div class="landing-logo-badge">
+        <span class="trn-logo-box" style="padding:3px 8px; font-size:12px;">TRN</span>
+        <span style="font-size:12px; font-weight:800; letter-spacing:0.8px; color:#fff;">VALORANT PERFORMANCE TRACKER</span>
+      </div>
+
+      <h1 class="landing-title">TRACK YOUR <span>VALORANT</span> STATS</h1>
+      <p class="landing-subtitle">
+        Enter any player's <strong>Riot ID</strong> and <strong>#Hash Tagline</strong> below to open their Competitive Overview, Episode & Act history, Weapon Hitbox Accuracy, and 10-Player Match Scoreboards.
+      </p>
+
+      <div class="landing-search-card">
+        <div class="landing-input-row">
+          <div class="landing-field-group">
+            <label class="landing-field-lbl" for="landingPlayerName">Riot ID (Game Name)</label>
+            <input type="text" id="landingPlayerName" class="landing-input" placeholder="e.g. ShadowBlade" autocomplete="off"
+                   onkeydown="if(event.key==='Enter') submitLandingSearch()" />
+          </div>
+
+          <div class="landing-hash-sep">#</div>
+
+          <div class="landing-field-group">
+            <label class="landing-field-lbl" for="landingPlayerTag">Hash / Tagline</label>
+            <input type="text" id="landingPlayerTag" class="landing-input" placeholder="e.g. 4821" autocomplete="off"
+                   onkeydown="if(event.key==='Enter') submitLandingSearch()" />
+          </div>
+
+          <div class="landing-field-group">
+            <label class="landing-field-lbl" for="landingPlayerRegion">Region</label>
+            <select id="landingPlayerRegion" class="landing-select">
+              <option value="ap" selected>AP (Asia-Pacific)</option>
+              <option value="na">NA (North America)</option>
+              <option value="eu">EU (Europe)</option>
+              <option value="kr">KR (Korea)</option>
+              <option value="latam">LATAM</option>
+              <option value="br">BR (Brazil)</option>
+            </select>
+          </div>
+
+          <button class="landing-submit-btn" onclick="submitLandingSearch()">🔍 Track Stats →</button>
+        </div>
+
+        <div id="landingErrorMsg" class="landing-error-msg">
+          Please enter both a Riot ID (Game Name) and a #Hash Tagline to continue.
+        </div>
+      </div>
+
+      <div class="landing-features-grid">
+        <div class="landing-feat-card">
+          <div class="landing-feat-title"><span style="color:var(--trn-red);">●</span> Competitive Rating & All Acts</div>
+          <div class="landing-feat-desc">Live Competitive Rank, RR, ELO, Peak Rating, and complete Episode & Act progression history.</div>
+        </div>
+        <div class="landing-feat-card">
+          <div class="landing-feat-title"><span style="color:var(--trn-teal);">●</span> Weapon Hitbox & Arsenal</div>
+          <div class="landing-feat-desc">Per-weapon Head %, Body %, and Legs % hitbox dummy breakdown and full-season weapon kill totals.</div>
+        </div>
+        <div class="landing-feat-card">
+          <div class="landing-feat-title"><span style="color:var(--trn-gold);">●</span> 11 Game Modes & Scoreboards</div>
+          <div class="landing-feat-desc">Track Competitive, Unrated, Swiftplay, Deathmatch, TDM, Spike Rush, and full 10-player scoreboards.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== STEP 2: MAIN WEBSITE DASHBOARD (HIDDEN UNTIL SEARCHED) ==================== -->
+  <div id="mainDashboardWrapper" style="display:none;">
+
   <!-- ==================== 1. TRACKER.GG TOP NAVBAR ==================== -->
   <header class="trn-navbar">
-    <div class="trn-brand">
+    <div class="trn-brand" onclick="showLandingPage()" style="cursor:pointer;" title="Return to Search Home">
       <div class="trn-logo-box">TRN</div>
       <div class="trn-brand-title">VALORANT <span>TRACKER</span></div>
     </div>
 
     <div class="trn-search-bar">
       <span style="font-size:11px; color:var(--text-secondary); font-weight:700;">RIOT ID</span>
-      <input type="text" id="playerName" value="Karthikkkk" style="width:115px;" placeholder="Player Name" />
+      <input type="text" id="playerName" value="Karthikkkk" style="width:115px;" placeholder="Player Name"
+             onkeydown="if(event.key==='Enter') fetchAllLiveApiData()" />
       <span style="color:var(--text-muted);">#</span>
-      <input type="text" id="playerTag" value="1795" style="width:60px;" placeholder="TAG" />
+      <input type="text" id="playerTag" value="1795" style="width:60px;" placeholder="TAG"
+             onkeydown="if(event.key==='Enter') fetchAllLiveApiData()" />
       <div class="trn-search-divider"></div>
       <select id="playerRegion">
         <option value="ap" selected>AP</option>
@@ -1231,6 +1530,7 @@
     </div>
 
     <div style="display:flex; gap:8px;">
+      <button class="btn-trn btn-dark" onclick="showLandingPage()">← Change Player</button>
       <button class="btn-trn btn-dark" onclick="fetchAllLiveApiData()">↻ Refresh</button>
     </div>
   </header>
@@ -1662,6 +1962,7 @@
     </div>
 
   </main>
+  </div><!-- End #mainDashboardWrapper -->
 
   <script>
     const _AUTH_TOKEN = atob('SERFVi1mZGFiZDI5Ni1hNjdjLTQ3M2QtOWY3YS1lZmMxZjE4M2FlNDA=');
@@ -1738,13 +2039,76 @@
       return code.toUpperCase();
     }
 
+    const RANDOM_PLACEHOLDER_NAMES = ['ShadowViper', 'PhantomAce', 'RadiantPulse', 'NightOmen', 'VandalKing', 'CyberJett', 'NovaStrike', 'ApexReyna'];
+    const RANDOM_PLACEHOLDER_TAGS = ['VAL', '4821', 'ACE', '9042', 'GGWP', '7710', 'PRO', '1024'];
+
+    function assignRandomLandingPlaceholders() {
+      const nameInput = document.getElementById('landingPlayerName');
+      const tagInput = document.getElementById('landingPlayerTag');
+      if (nameInput) {
+        const randName = RANDOM_PLACEHOLDER_NAMES[Math.floor(Math.random() * RANDOM_PLACEHOLDER_NAMES.length)];
+        nameInput.placeholder = `e.g. ${randName}`;
+      }
+      if (tagInput) {
+        const randTag = RANDOM_PLACEHOLDER_TAGS[Math.floor(Math.random() * RANDOM_PLACEHOLDER_TAGS.length)];
+        tagInput.placeholder = `e.g. ${randTag}`;
+      }
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
       localStorage.removeItem('trn_valorant_matches_v2');
       localStorage.removeItem('valorant_sql_matches');
       localStorage.removeItem('henrik_api_key');
+      localStorage.removeItem('trn_recent_searches_v1');
+
+      assignRandomLandingPlaceholders();
+      const nameInput = document.getElementById('landingPlayerName');
+      if (nameInput) nameInput.focus();
+    });
+
+    function submitLandingSearch() {
+      const nameEl = document.getElementById('landingPlayerName');
+      const tagEl = document.getElementById('landingPlayerTag');
+      const regEl = document.getElementById('landingPlayerRegion');
+      const errEl = document.getElementById('landingErrorMsg');
+
+      const name = (nameEl.value || '').trim();
+      const tag = (tagEl.value || '').trim().replace(/^#/, '');
+      const region = regEl.value || 'ap';
+
+      if (!name || !tag) {
+        errEl.style.display = 'block';
+        return;
+      }
+      errEl.style.display = 'none';
+      launchDashboardForPlayer(name, tag, region);
+    }
+
+    function launchDashboardForPlayer(name, tag, region) {
+      document.getElementById('playerName').value = name;
+      document.getElementById('playerTag').value = tag;
+      document.getElementById('playerRegion').value = region || 'ap';
+
+      document.getElementById('landingSearchPage').style.display = 'none';
+      document.getElementById('mainDashboardWrapper').style.display = 'block';
+
+      selectedActFilter = 'ALL_ACTS';
+      activeModeKey = 'ALL';
+      activeModeLabel = 'All Modes';
+      document.querySelectorAll('#modeFilterPills .pill-btn').forEach((b, i) => {
+        b.classList.toggle('active', i === 0);
+      });
 
       fetchAllLiveApiData();
-    });
+    }
+
+    function showLandingPage() {
+      document.getElementById('mainDashboardWrapper').style.display = 'none';
+      document.getElementById('landingSearchPage').style.display = 'flex';
+      assignRandomLandingPlaceholders();
+      const nameInput = document.getElementById('landingPlayerName');
+      if (nameInput) nameInput.focus();
+    }
 
     function getSnapshotKey(region, name, tag) {
       return `trn_fast_snapshot_v2:${(region || 'ap').toLowerCase()}:${(name || '').toLowerCase()}:${(tag || '').toLowerCase()}`;
