@@ -1,0 +1,13 @@
+# Valorant Local Match Log File (Format: MATCH_ID|PLAYER|TAG|REGION|MAP|AGENT|MODE|WEAPON|K|D|A|RW|RL|HS|BS|LS|ACS|DATE)
+VAL-2026-101|Karthikkkk|1795|ap|Ascent|Jett|Competitive|Vandal|24|14|5|13|9|28|38|6|284|2026-11-10 18:30
+VAL-2026-102|Karthikkkk|1795|ap|Bind|Raze|Competitive|Phantom|19|16|7|13|11|19|42|8|241|2026-11-11 19:15
+VAL-2026-103|Karthikkkk|1795|ap|Haven|Omen|Competitive|Vandal|16|17|11|10|13|17|39|9|208|2026-11-12 20:00
+VAL-2026-104|Karthikkkk|1795|ap|Split|Jett|Competitive|Operator|27|12|4|13|7|22|29|3|312|2026-11-13 21:10
+VAL-2026-105|Karthikkkk|1795|ap|Lotus|Reyna|Competitive|Vandal|22|15|6|13|10|26|35|5|265|2026-11-14 17:45
+VAL-2026-106|Karthikkkk|1795|ap|Sunset|Clove|Competitive|Phantom|18|18|9|11|13|18|44|7|219|2026-11-15 19:50
+VAL-2026-107|Karthikkkk|1795|ap|Icebox|Sova|Competitive|Vandal|20|13|10|13|8|24|36|4|252|2026-11-16 20:30
+VAL-2026-108|Karthikkkk|1795|ap|Ascent|Jett|Competitive|Vandal|29|13|5|13|6|33|34|4|334|2026-11-17 21:00
+VAL-2026-109|Karthikkkk|1795|ap|Pearl|Killjoy|Competitive|Phantom|17|15|8|13|11|16|38|6|214|2026-11-18 18:20
+VAL-2026-110|Karthikkkk|1795|ap|Abyss|Jett|Competitive|Vandal|25|14|6|13|9|31|37|5|295|2026-11-19 22:05
+VAL-2026-111|Karthikkkk|1795|ap|Bind|Reyna|Competitive|Vandal|23|16|5|12|14|27|40|6|258|2026-11-20 19:40
+VAL-2026-112|Karthikkkk|1795|ap|Haven|Jett|Competitive|Vandal|31|12|7|13|5|36|32|3|348|2026-11-21 16:15
